@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+echo "🔍 [zserde-hook] Running pre-commit validation harness..."
+
+# 1. Format check
+if command -v zig >/dev/null 2>&1; then
+    echo "  -> Checking zig fmt..."
+    zig fmt --check src/ examples/ tests/ build.zig || {
+        echo "❌ zig fmt check failed! Run 'zig fmt src/ examples/ tests/ build.zig' to fix."
+        exit 1
+    }
+fi
+
+# 2. Build & Test check
+if command -v zig >/dev/null 2>&1; then
+    echo "  -> Running unit & integration tests..."
+    zig build test || {
+        echo "❌ 'zig build test' failed! Fix failing tests before committing."
+        exit 1
+    }
+fi
+
+# 3. Privacy & Leak check
+echo "  -> Checking for leaked private paths..."
+if git diff --cached | grep -E "/home/[a-z]+|localhost:[0-9]{4,5}|[a-zA-Z0-9.-]+\.internal" >/dev/null 2>&1; then
+    echo "⚠️  WARNING: Potential internal path or domain detected in staged diff:"
+    git diff --cached | grep -E "/home/[a-z]+|localhost:[0-9]{4,5}|[a-zA-Z0-9.-]+\.internal" || true
+    echo "Please sanitize any private hostnames/paths before pushing."
+fi
+
+# 4. Version check in build.zig.zon
+if [ -f "build.zig.zon" ]; then
+    VERSION=$(grep -oP '\.version\s*=\s*"\K[^"]+' build.zig.zon || true)
+    if [ -z "$VERSION" ]; then
+        echo "❌ Error: build.zig.zon missing .version field!"
+        exit 1
+    fi
+    echo "  -> Current build.zig.zon version: $VERSION"
+fi
+
+echo "✅ [zserde-hook] All pre-commit checks passed!"
+exit 0

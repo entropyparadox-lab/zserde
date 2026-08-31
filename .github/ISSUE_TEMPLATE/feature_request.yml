@@ -1,0 +1,31 @@
+name: "💡 Feature Request / RFC"
+description: "Suggest a new format, codec optimization, or API enhancement"
+title: "[RFC]: "
+labels: ["enhancement", "discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We welcome proposals for new formats, performance optimizations, and ergonomics improvements!
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problem / Motivation"
+      description: "Is your feature request related to a problem or limitation? Please explain."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "Proposed Solution & API Design"
+      description: "Describe the desired Zig API or behavior with code examples."
+      render: zig
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives Considered"
+      description: "Any alternative approaches or how other languages (Rust/Go/C++) handle this."
+    validations:
+      required: false

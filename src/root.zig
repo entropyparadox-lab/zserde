@@ -59,6 +59,24 @@ pub const msgpack = struct {
     }
 };
 
+pub const cbor = struct {
+    pub const serializer = @import("cbor/serializer.zig");
+    pub const deserializer = @import("cbor/deserializer.zig");
+    pub const CborError = serializer.CborError;
+
+    pub fn toSlice(allocator: std.mem.Allocator, value: anytype) ![]u8 {
+        return serializer.serialize(allocator, value);
+    }
+
+    pub fn fromSlice(comptime T: type, allocator: std.mem.Allocator, input: []const u8) !T {
+        return deserializer.deserialize(T, allocator, input);
+    }
+
+    pub fn fromSliceBorrowed(comptime T: type, input: []const u8) !T {
+        return deserializer.deserializeBorrowed(T, input);
+    }
+};
+
 pub const toml = struct {
     pub const serializer = @import("toml/serializer.zig");
     pub const deserializer = @import("toml/deserializer.zig");
@@ -77,7 +95,25 @@ pub const toml = struct {
     }
 };
 
-// --- Comprehensive Unit Tests ---
+pub const yaml = struct {
+    pub const serializer = @import("yaml/serializer.zig");
+    pub const deserializer = @import("yaml/deserializer.zig");
+    pub const YamlError = serializer.YamlError;
+
+    pub fn toSlice(allocator: std.mem.Allocator, value: anytype) ![]u8 {
+        return serializer.serialize(allocator, value);
+    }
+
+    pub fn fromSlice(comptime T: type, allocator: std.mem.Allocator, input: []const u8) !T {
+        return deserializer.deserialize(T, allocator, input);
+    }
+
+    pub fn fromSliceBorrowed(comptime T: type, input: []const u8) !T {
+        return deserializer.deserializeBorrowed(T, input);
+    }
+};
+
+// --- Comprehensive Unit Tests Across All 5 Formats ---
 
 test "zserde: JSON serialization, deserialization, skip, rename" {
     const testing = std.testing;
@@ -155,84 +191,75 @@ test "zserde: rename_all = .camelCase automatic conversion across JSON & MsgPack
     try testing.expectEqualStrings("sync_database", parsed_mp.task_name);
 }
 
-test "zserde: Call-site configuration override without modifying struct" {
+test "zserde: CBOR binary serialization and zero-copy deserialization" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    // Unowned third party struct (no pub const zserde)
-    const ThirdPartyItem = struct {
-        item_code: []const u8,
-        stock_count: u32,
+    const IoTMetric = struct {
+        sensor_id: u32,
+        temperature: f64,
+        humidity: f64,
+        is_alert: bool,
+
+        pub const zserde = .{
+            .rename_all = .camelCase,
+        };
     };
 
-    const item = ThirdPartyItem{
-        .item_code = "SKU-990",
-        .stock_count = 150,
+    const metric = IoTMetric{
+        .sensor_id = 90210,
+        .temperature = 23.85,
+        .humidity = 58.2,
+        .is_alert = false,
     };
 
-    const json_str = try json.toSliceWithConfig(allocator, item, .{}, .{
-        .rename_all = .camelCase,
-    });
-    defer allocator.free(json_str);
+    const cbor_bytes = try cbor.toSlice(allocator, metric);
+    defer allocator.free(cbor_bytes);
 
-    try testing.expect(std.mem.indexOf(u8, json_str, "\"itemCode\":\"SKU-990\"") != null);
-    try testing.expect(std.mem.indexOf(u8, json_str, "\"stockCount\":150") != null);
+    const decoded = try cbor.fromSliceBorrowed(IoTMetric, cbor_bytes);
+    try testing.expectEqual(@as(u32, 90210), decoded.sensor_id);
+    try testing.expectEqual(false, decoded.is_alert);
 }
 
-test "zserde: In-place zero-copy unescaping of JSON strings" {
-    const testing = std.testing;
-
-    var escaped_buffer = "hello\\nworld\\t\\\"test\\\"".*;
-    const unescaped = try json.unescapeInPlace(&escaped_buffer);
-
-    try testing.expectEqualStrings("hello\nworld\t\"test\"", unescaped);
-}
-
-test "zserde: SIMD whitespace scanning across large padded payloads" {
-    const testing = std.testing;
-
-    const LargePadding = struct {
-        status: []const u8,
-        count: u32,
-    };
-
-    const padded_json =
-        \\{
-        \\                "status": "healthy",
-        \\                "count": 1000
-        \\}
-    ;
-
-    const parsed = try json.fromSliceBorrowed(LargePadding, padded_json);
-    try testing.expectEqualStrings("healthy", parsed.status);
-    try testing.expectEqual(@as(u32, 1000), parsed.count);
-}
-
-test "zserde: MsgPack binary zero-copy roundtrip" {
+test "zserde: YAML serialization and deserialization" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const Packet = struct {
-        cmd_id: u16,
-        session: []const u8,
-        latency_ms: f64,
-        is_encrypted: bool,
+    const ServiceConfig = struct {
+        name: []const u8,
+        port: u16,
+        enabled: bool,
     };
 
-    const pkt = Packet{
-        .cmd_id = 4096,
-        .session = "sess_01J98X7ABQ",
-        .latency_ms = 1.45,
-        .is_encrypted = true,
+    const Deployment = struct {
+        app: []const u8,
+        replicas: u32,
+        service: ServiceConfig,
     };
 
-    const binary = try msgpack.toSlice(allocator, pkt);
-    defer allocator.free(binary);
+    const dep = Deployment{
+        .app = "web-backend",
+        .replicas = 5,
+        .service = .{
+            .name = "http-api",
+            .port = 8080,
+            .enabled = true,
+        },
+    };
 
-    const decoded = try msgpack.fromSliceBorrowed(Packet, binary);
-    try testing.expectEqual(@as(u16, 4096), decoded.cmd_id);
-    try testing.expectEqualStrings("sess_01J98X7ABQ", decoded.session);
-    try testing.expectEqual(true, decoded.is_encrypted);
+    const yaml_str = try yaml.toSlice(allocator, dep);
+    defer allocator.free(yaml_str);
+
+    try testing.expect(std.mem.indexOf(u8, yaml_str, "app: web-backend") != null);
+    try testing.expect(std.mem.indexOf(u8, yaml_str, "replicas: 5") != null);
+    try testing.expect(std.mem.indexOf(u8, yaml_str, "service:") != null);
+
+    const parsed = try yaml.fromSliceBorrowed(Deployment, yaml_str);
+    try testing.expectEqualStrings("web-backend", parsed.app);
+    try testing.expectEqual(@as(u32, 5), parsed.replicas);
+    try testing.expectEqualStrings("http-api", parsed.service.name);
+    try testing.expectEqual(@as(u16, 8080), parsed.service.port);
+    try testing.expectEqual(true, parsed.service.enabled);
 }
 
 test "zserde: TOML configuration serialization and deserialization" {

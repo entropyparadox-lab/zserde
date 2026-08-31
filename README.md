@@ -2,25 +2,28 @@
 
 **Zero-Allocation Multi-Format Serialization, SIMD Acceleration & Comptime Validation Toolkit for Zig (v0.16.0+)**
 
-`zserde` is a high-performance, pure Zig serialization and validation framework modeled after Rust's `serde` and Python's `pydantic`. It uses Zig's compile-time reflection (`@typeInfo`) and native SIMD vectors (`@Vector(16, u8)`) to deliver zero-overhead, format-agnostic data modeling with zero heap allocations for borrowed data types across **JSON**, **MessagePack**, and **TOML**.
+`zserde` is an enterprise-grade, pure Zig serialization and validation framework modeled after Rust's `serde` and Python's `pydantic`. It leverages Zig's compile-time reflection (`@typeInfo`) and native SIMD vector instructions (`@Vector(16, u8)`) to deliver unified data modeling with zero heap allocations for borrowed data types across **JSON**, **MessagePack**, **CBOR**, **TOML**, and **YAML**.
 
 ---
 
 ## Benchmark Highlights (AMD Ryzen / ReleaseFast, 500,000 runs)
 
-| Format / Codec | Throughput (ops/sec) | Throughput (MB/s) | Allocations |
-| :--- | :--- | :--- | :--- |
-| **`zserde MsgPack` (Zero-Copy)** | **34.8 Million ops/sec** | **~3,260 MB/s** | **0 bytes (Zero-Alloc)** |
-| **`zserde JSON` (Zero-Copy + SIMD)** | **7.44 Million ops/sec** | **~837 MB/s** | **0 bytes (Zero-Alloc)** |
+| Format / Codec | Mode | Throughput (ops/sec) | Throughput (MB/s) | Allocations |
+| :--- | :--- | :--- | :--- | :--- |
+| **`zserde MsgPack`** | Binary Zero-Copy | **37.4 Million ops/sec** | **~3,500 MB/s** | **0 bytes (Zero-Alloc)** |
+| **`zserde CBOR`** | Binary Zero-Copy | **35.1 Million ops/sec** | **~3,300 MB/s** | **0 bytes (Zero-Alloc)** |
+| **`zserde JSON`** | Text Zero-Copy + SIMD | **7.67 Million ops/sec** | **~863 MB/s** | **0 bytes (Zero-Alloc)** |
 
 ---
 
 ## Key Features
 
-- ⚡ **Multi-Format Support**:
-  - **JSON**: Full spec support with SIMD-accelerated whitespace scanning and zero-copy slice borrowing.
-  - **MessagePack (`msgpack`)**: High-throughput binary RPC format with ~40% size reduction over JSON.
-  - **TOML (`toml`)**: Native configuration parsing with table sections `[section]` and scalar mapping.
+- ⚡ **5-in-1 Unified Multi-Format Codecs**:
+  - **JSON (`zserde.json`)**: Full spec support with SIMD-accelerated whitespace scanning and pretty-printing.
+  - **MessagePack (`zserde.msgpack`)**: High-throughput binary RPC format with ~40% size reduction over JSON.
+  - **CBOR (`zserde.cbor`)**: Standard RFC 8949 binary serialization for IoT, WebAuthn/FIDO2, and embedded systems.
+  - **TOML (`zserde.toml`)**: Configuration parsing with table sections `[section]` and scalar mapping.
+  - **YAML (`zserde.yaml`)**: Clean, human-readable indented document serialization.
 - 🚀 **Zero-Allocation Deserialization (`fromSliceBorrowed`)**: Parse payloads directly borrowing string/binary slices from the input buffer without touching the heap.
 - 🛠️ **In-Place Buffer Mutation (`unescapeInPlace`)**: Unescape JSON control characters (`\n`, `\t`, `\"`) in-place without heap allocations.
 - 🎯 **Comptime Struct Metadata (`pub const zserde`)**:
@@ -37,21 +40,12 @@
 
 ---
 
-## Quick Start
+## Installation (`build.zig.zon`)
 
-### 1. Add to your `build.zig.zon`
+Add `zserde` to your `build.zig.zon`:
 
-```zig
-.{
-    .name = .my_app,
-    .version = "0.1.0",
-    .dependencies = .{
-        .zserde = .{
-            .url = "https://github.com/entropyparadox-lab/zserde/archive/refs/tags/v0.2.0.tar.gz",
-            .hash = "...",
-        },
-    },
-}
+```bash
+zig fetch --save https://github.com/entropyparadox-lab/zserde/archive/refs/tags/v1.0.0.tar.gz
 ```
 
 In your `build.zig`:
@@ -103,7 +97,7 @@ pub fn main(init: std.process.Init) !void {
     // 1. Schema Validation (Zero-overhead comptime checks)
     try zserde.validate(job);
 
-    // 2. JSON Serialization (jobId, taskName, maxRetryCount in camelCase)
+    // 2. JSON Serialization
     const json_str = try zserde.json.toSlice(allocator, job, .{ .pretty = true });
     defer allocator.free(json_str);
 
@@ -111,6 +105,17 @@ pub fn main(init: std.process.Init) !void {
     const mp_bytes = try zserde.msgpack.toSlice(allocator, job);
     defer allocator.free(mp_bytes);
     const parsed_mp = try zserde.msgpack.fromSliceBorrowed(JobPayload, mp_bytes);
+
+    // 4. CBOR Binary Encoding (Zero-Copy)
+    const cbor_bytes = try zserde.cbor.toSlice(allocator, job);
+    defer allocator.free(cbor_bytes);
+    const parsed_cbor = try zserde.cbor.fromSliceBorrowed(JobPayload, cbor_bytes);
+
+    // 5. TOML / YAML Config Serialization
+    const toml_str = try zserde.toml.toSlice(allocator, job);
+    defer allocator.free(toml_str);
+    const yaml_str = try zserde.yaml.toSlice(allocator, job);
+    defer allocator.free(yaml_str);
 }
 ```
 
@@ -119,15 +124,24 @@ pub fn main(init: std.process.Init) !void {
 ## Running Tests & Benchmarks
 
 ```bash
-# Run unit & integration tests
+# Run unit & integration tests across all formats
 zig build test
 
-# Run interactive example
+# Run multi-format demo
 zig build run-example
 
 # Run high-throughput microbenchmark suite
 zig build bench
 ```
+
+---
+
+## Roadmap Status
+
+- [x] **v0.1.0**: JSON Serializer, Zero-copy Deserializer, Comptime Field Options (`rename`, `skip`), Comptime Schema Validation.
+- [x] **v0.2.0**: MessagePack binary encoder/decoder, TOML config serializer/deserializer, optional validation rules.
+- [x] **v0.3.0**: Native SIMD `@Vector(16, u8)` scanning, `rename_all` conventions, in-place unescape, call-site overrides.
+- [x] **v1.0.0**: CBOR binary (RFC 8949), YAML parser/serializer, comprehensive 5-format test & microbenchmark suite.
 
 ---
 

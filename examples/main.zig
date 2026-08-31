@@ -31,13 +31,13 @@ const ServiceManifest = struct {
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
 
-    std.debug.print("\n=================================================================\n", .{});
-    std.debug.print("  ⚡ zserde v0.2.0: Multi-Format Serialization & Validation for Zig\n", .{});
-    std.debug.print("=================================================================\n\n", .{});
+    std.debug.print("\n=================================================================================\n", .{});
+    std.debug.print("  ⚡ zserde v1.0.0: Unified Multi-Format Serialization & Validation for Zig\n", .{});
+    std.debug.print("=================================================================================\n\n", .{});
 
     const manifest = ServiceManifest{
         .service_name = "auth-gateway",
-        .version = "2.1.0",
+        .version = "1.0.0",
         .replicas = 8,
         .internal_token = "tok_super_secret_never_leak",
         .server = .{
@@ -61,22 +61,36 @@ pub fn main(init: std.process.Init) !void {
     // 3. MessagePack Binary Encoding & Zero-Copy Decoding
     const msgpack_bytes = try zserde.msgpack.toSlice(allocator, manifest);
     defer allocator.free(msgpack_bytes);
-    std.debug.print("📦 3. [MessagePack Binary] Size: {} bytes (JSON was {} bytes, {d:.1}% reduction)\n", .{
+    const decoded_mp = try zserde.msgpack.fromSliceBorrowed(ServiceManifest, msgpack_bytes);
+    std.debug.print("📦 3. [MessagePack Binary] Size: {} bytes (JSON: {} bytes, {d:.1}% reduction)\n", .{
         msgpack_bytes.len,
         json_data.len,
         (1.0 - @as(f64, @floatFromInt(msgpack_bytes.len)) / @as(f64, @floatFromInt(json_data.len))) * 100.0,
     });
-
-    const decoded_mp = try zserde.msgpack.fromSliceBorrowed(ServiceManifest, msgpack_bytes);
-    std.debug.print("   -> Decoded from binary: service={s}, port={d}\n\n", .{
+    std.debug.print("   -> Decoded from MsgPack: service={s}, port={d}\n\n", .{
         decoded_mp.service_name,
         decoded_mp.server.port,
     });
 
-    // 4. TOML Configuration Serialization
+    // 4. CBOR Binary Encoding & Zero-Copy Decoding
+    const cbor_bytes = try zserde.cbor.toSlice(allocator, manifest);
+    defer allocator.free(cbor_bytes);
+    const decoded_cbor = try zserde.cbor.fromSliceBorrowed(ServiceManifest, cbor_bytes);
+    std.debug.print("🔷 4. [CBOR Binary RFC-8949] Size: {} bytes\n", .{cbor_bytes.len});
+    std.debug.print("   -> Decoded from CBOR: service={s}, replicas={d}\n\n", .{
+        decoded_cbor.service_name,
+        decoded_cbor.replicas,
+    });
+
+    // 5. TOML Configuration Serialization
     const toml_data = try zserde.toml.toSlice(allocator, manifest);
     defer allocator.free(toml_data);
-    std.debug.print("⚙️  4. [TOML Config Output]:\n{s}\n", .{toml_data});
+    std.debug.print("⚙️  5. [TOML Config Output]:\n{s}\n", .{toml_data});
 
-    std.debug.print("🎉 All multi-format benchmarks & validations completed successfully!\n\n", .{});
+    // 6. YAML Configuration Serialization
+    const yaml_data = try zserde.yaml.toSlice(allocator, manifest);
+    defer allocator.free(yaml_data);
+    std.debug.print("📜 6. [YAML Document Output]:\n{s}\n", .{yaml_data});
+
+    std.debug.print("🎉 All 5 formats (JSON, MsgPack, CBOR, TOML, YAML) validated successfully!\n\n", .{});
 }

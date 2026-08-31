@@ -9,10 +9,10 @@ pub const ValidationError = error{
     CustomValidationFailed,
 };
 
-pub const ValidationResult = struct {
-    valid: bool,
-    error_message: ?[]const u8 = null,
-    field_name: ?[]const u8 = null,
+pub const FieldViolation = struct {
+    field: []const u8,
+    code: ValidationError,
+    message: []const u8,
 };
 
 pub fn validate(value: anytype) ValidationError!void {
@@ -34,7 +34,7 @@ pub fn validate(value: anytype) ValidationError!void {
                 }
             }
 
-            // Also validate nested structs if applicable
+            // Also validate nested structs
             inline for (std.meta.fields(T)) |f| {
                 if (@typeInfo(f.type) == .@"struct") {
                     try validate(@field(value, f.name));
@@ -49,6 +49,14 @@ fn validateField(val: anytype, rule: anytype) ValidationError!void {
     const ValType = @TypeOf(val);
     const val_info = @typeInfo(ValType);
     const RuleType = @TypeOf(rule);
+
+    // Handle Optionals
+    if (val_info == .optional) {
+        if (val) |unwrapped| {
+            return validateField(unwrapped, rule);
+        }
+        return; // null is valid
+    }
 
     // Number constraints: min, max
     if (val_info == .int or val_info == .float) {
@@ -82,6 +90,16 @@ fn validateField(val: anytype, rule: anytype) ValidationError!void {
             if (!std.mem.endsWith(u8, val, rule.ends_with)) {
                 return ValidationError.PatternMismatch;
             }
+        }
+    }
+
+    // Slice / Array item validation
+    if (val_info == .pointer and val_info.pointer.size == .slice and val_info.pointer.child != u8) {
+        if (@hasField(RuleType, "min_len")) {
+            if (val.len < rule.min_len) return ValidationError.StringTooShort;
+        }
+        if (@hasField(RuleType, "max_len")) {
+            if (val.len > rule.max_len) return ValidationError.StringTooLong;
         }
     }
 

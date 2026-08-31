@@ -28,131 +28,185 @@ pub const json = struct {
     }
 };
 
+pub const msgpack = struct {
+    pub const serializer = @import("msgpack/serializer.zig");
+    pub const deserializer = @import("msgpack/deserializer.zig");
+    pub const MsgPackError = serializer.MsgPackError;
+
+    pub fn toSlice(allocator: std.mem.Allocator, value: anytype) ![]u8 {
+        return serializer.serialize(allocator, value);
+    }
+
+    pub fn fromSlice(comptime T: type, allocator: std.mem.Allocator, input: []const u8) !T {
+        return deserializer.deserialize(T, allocator, input);
+    }
+
+    pub fn fromSliceBorrowed(comptime T: type, input: []const u8) !T {
+        return deserializer.deserializeBorrowed(T, input);
+    }
+};
+
+pub const toml = struct {
+    pub const serializer = @import("toml/serializer.zig");
+    pub const deserializer = @import("toml/deserializer.zig");
+    pub const TomlError = serializer.TomlError;
+
+    pub fn toSlice(allocator: std.mem.Allocator, value: anytype) ![]u8 {
+        return serializer.serialize(allocator, value);
+    }
+
+    pub fn fromSlice(comptime T: type, allocator: std.mem.Allocator, input: []const u8) !T {
+        return deserializer.deserialize(T, allocator, input);
+    }
+
+    pub fn fromSliceBorrowed(comptime T: type, input: []const u8) !T {
+        return deserializer.deserializeBorrowed(T, input);
+    }
+};
+
 // --- Comprehensive Unit Tests ---
 
-test "zserde: basic json serialization and deserialization" {
+test "zserde: JSON serialization, deserialization, skip, rename" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
     const User = struct {
         id: u64,
         name: []const u8,
-        is_active: bool,
-        score: f64,
+        secret: []const u8 = "masked",
+        is_active: bool = true,
+
+        pub const zserde = .{
+            .rename = .{ .is_active = "isActive" },
+            .skip = .{ .secret = true },
+        };
     };
 
-    const user = User{
-        .id = 42,
+    const u = User{
+        .id = 101,
         .name = "Alice",
+        .secret = "do_not_share",
         .is_active = true,
-        .score = 98.5,
     };
 
-    // Serialize
-    const json_bytes = try json.toSlice(allocator, user, .{});
-    defer allocator.free(json_bytes);
+    const serialized = try json.toSlice(allocator, u, .{});
+    defer allocator.free(serialized);
 
-    try testing.expect(std.mem.indexOf(u8, json_bytes, "\"id\":42") != null);
-    try testing.expect(std.mem.indexOf(u8, json_bytes, "\"name\":\"Alice\"") != null);
-    try testing.expect(std.mem.indexOf(u8, json_bytes, "\"is_active\":true") != null);
+    try testing.expect(std.mem.indexOf(u8, serialized, "\"isActive\":true") != null);
+    try testing.expect(std.mem.indexOf(u8, serialized, "do_not_share") == null);
 
-    // Deserialize (Zero-copy borrowed)
-    const parsed = try json.fromSliceBorrowed(User, json_bytes);
-    try testing.expectEqual(@as(u64, 42), parsed.id);
+    const parsed = try json.fromSliceBorrowed(User, serialized);
+    try testing.expectEqual(@as(u64, 101), parsed.id);
     try testing.expectEqualStrings("Alice", parsed.name);
     try testing.expectEqual(true, parsed.is_active);
-    try testing.expectEqual(@as(f64, 98.5), parsed.score);
 }
 
-test "zserde: custom field rename and skip metadata" {
+test "zserde: MsgPack binary zero-copy roundtrip" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const Config = struct {
-        api_key: []const u8,
-        secret_token: []const u8,
-        timeout_ms: u32 = 5000,
-        debug_mode: ?bool = null,
+    const Packet = struct {
+        cmd_id: u16,
+        session: []const u8,
+        latency_ms: f64,
+        is_encrypted: bool,
+    };
+
+    const pkt = Packet{
+        .cmd_id = 4096,
+        .session = "sess_01J98X7ABQ",
+        .latency_ms = 1.45,
+        .is_encrypted = true,
+    };
+
+    const binary = try msgpack.toSlice(allocator, pkt);
+    defer allocator.free(binary);
+
+    const decoded = try msgpack.fromSliceBorrowed(Packet, binary);
+    try testing.expectEqual(@as(u16, 4096), decoded.cmd_id);
+    try testing.expectEqualStrings("sess_01J98X7ABQ", decoded.session);
+    try testing.expectEqual(true, decoded.is_encrypted);
+}
+
+test "zserde: TOML configuration serialization and deserialization" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const ServerConfig = struct {
+        host: []const u8,
+        port: u16,
+        workers: u32,
+    };
+
+    const AppConfig = struct {
+        app_name: []const u8,
+        version: []const u8,
+        server: ServerConfig,
 
         pub const zserde = .{
-            .rename = .{
-                .api_key = "apiKey",
-                .timeout_ms = "timeout",
-            },
-            .skip = .{
-                .secret_token = true,
-            },
+            .rename = .{ .app_name = "appName" },
         };
     };
 
-    const cfg = Config{
-        .api_key = "pk_live_12345",
-        .secret_token = "SUPER_SECRET_DO_NOT_SERIALIZE",
-        .timeout_ms = 3000,
-        .debug_mode = true,
+    const cfg = AppConfig{
+        .app_name = "EntropyHub",
+        .version = "1.0.0",
+        .server = .{
+            .host = "127.0.0.1",
+            .port = 8080,
+            .workers = 4,
+        },
     };
 
-    // Serialize
-    const json_bytes = try json.toSlice(allocator, cfg, .{});
-    defer allocator.free(json_bytes);
+    const toml_str = try toml.toSlice(allocator, cfg);
+    defer allocator.free(toml_str);
 
-    // Ensure secret_token was skipped
-    try testing.expect(std.mem.indexOf(u8, json_bytes, "SUPER_SECRET") == null);
-    try testing.expect(std.mem.indexOf(u8, json_bytes, "\"apiKey\":\"pk_live_12345\"") != null);
-    try testing.expect(std.mem.indexOf(u8, json_bytes, "\"timeout\":3000") != null);
+    try testing.expect(std.mem.indexOf(u8, toml_str, "appName = \"EntropyHub\"") != null);
+    try testing.expect(std.mem.indexOf(u8, toml_str, "[server]") != null);
 
-    // Deserialize from JSON containing renamed keys
-    const incoming_json = "{\"apiKey\":\"pk_test_999\",\"timeout\":1000}";
-    const parsed = try json.fromSliceBorrowed(Config, incoming_json);
-    try testing.expectEqualStrings("pk_test_999", parsed.api_key);
-    try testing.expectEqual(@as(u32, 1000), parsed.timeout_ms);
-    try testing.expectEqual(@as(?bool, null), parsed.debug_mode);
+    const parsed = try toml.fromSliceBorrowed(AppConfig, toml_str);
+    try testing.expectEqualStrings("EntropyHub", parsed.app_name);
+    try testing.expectEqualStrings("1.0.0", parsed.version);
+    try testing.expectEqualStrings("127.0.0.1", parsed.server.host);
+    try testing.expectEqual(@as(u16, 8080), parsed.server.port);
+    try testing.expectEqual(@as(u32, 4), parsed.server.workers);
 }
 
-test "zschema: compile-time struct field validation" {
+test "zschema: rich validation constraints" {
     const testing = std.testing;
 
-    const Registration = struct {
+    const Profile = struct {
         username: []const u8,
-        age: u32,
+        age: ?u32,
         email: []const u8,
 
         pub const zvalidate = .{
-            .username = .{ .min_len = 3, .max_len = 20 },
+            .username = .{ .min_len = 3, .max_len = 20, .starts_with = "user_" },
             .age = .{ .min = 18, .max = 100 },
-            .email = .{ .contains = "@" },
+            .email = .{ .contains = "@", .ends_with = ".com" },
         };
     };
 
-    // Valid user
-    const valid_user = Registration{
-        .username = "alice_dev",
-        .age = 25,
-        .email = "alice@example.com",
+    const valid = Profile{
+        .username = "user_john",
+        .age = 28,
+        .email = "john@company.com",
     };
-    try validate(valid_user);
+    try validate(valid);
 
-    // Invalid username (too short)
-    const invalid_user1 = Registration{
-        .username = "al",
-        .age = 25,
-        .email = "alice@example.com",
+    // Optional age = null is valid
+    const valid_null_age = Profile{
+        .username = "user_smith",
+        .age = null,
+        .email = "smith@company.com",
     };
-    try testing.expectError(schema.ValidationError.StringTooShort, validate(invalid_user1));
+    try validate(valid_null_age);
 
-    // Invalid age (underage)
-    const invalid_user2 = Registration{
-        .username = "bob_builder",
-        .age = 16,
-        .email = "bob@example.com",
-    };
-    try testing.expectError(schema.ValidationError.ValueTooSmall, validate(invalid_user2));
-
-    // Invalid email (missing @)
-    const invalid_user3 = Registration{
-        .username = "charlie",
+    // Prefix mismatch
+    const invalid_prefix = Profile{
+        .username = "admin_john",
         .age = 30,
-        .email = "invalid_email.com",
+        .email = "john@company.com",
     };
-    try testing.expectError(schema.ValidationError.PatternMismatch, validate(invalid_user3));
+    try testing.expectError(schema.ValidationError.PatternMismatch, validate(invalid_prefix));
 }

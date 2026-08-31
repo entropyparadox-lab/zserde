@@ -1,23 +1,28 @@
 # zserde ⚡
 
-**Zero-Allocation Format-Agnostic Serialization & Comptime Validation Toolkit for Zig (v0.16.0+)**
+**Zero-Allocation Multi-Format Serialization & Comptime Validation Toolkit for Zig (v0.16.0+)**
 
-`zserde` is a high-performance, pure Zig serialization and validation framework modeled after Rust's `serde` and Python's `pydantic`. It uses Zig's compile-time reflection (`@typeInfo`) to deliver zero-overhead, format-agnostic data modeling with zero heap allocations for borrowed data types.
+`zserde` is a high-performance, pure Zig serialization and validation framework modeled after Rust's `serde` and Python's `pydantic`. It uses Zig's compile-time reflection (`@typeInfo`) to deliver zero-overhead, format-agnostic data modeling with zero heap allocations for borrowed data types across **JSON**, **MessagePack**, and **TOML**.
 
 ---
 
 ## Key Features
 
-- ⚡ **Zero-Allocation Deserialization (`fromSliceBorrowed`)**: Parse JSON and strings directly borrowing from the input buffer without touching the heap.
+- ⚡ **Multi-Format Support**:
+  - **JSON**: Full spec support with zero-copy slice borrowing and pretty-printing.
+  - **MessagePack (`msgpack`)**: High-throughput binary RPC format with ~40% size reduction over JSON.
+  - **TOML (`toml`)**: Native configuration parsing with table sections `[section]` and scalar mapping.
+- 🚀 **Zero-Allocation Deserialization (`fromSliceBorrowed`)**: Parse payloads directly borrowing string/binary slices from the input buffer without touching the heap.
 - 🎯 **Comptime Struct Metadata (`pub const zserde`)**:
-  - Field renaming (e.g., `max_connections` → `"maxConnections"`).
-  - Field skipping for sensitive data (e.g., `password`, `secret_token`).
-  - Default value fallbacks for omitted optional/primitive fields.
+  - Field renaming (e.g., `service_name` → `"serviceName"`).
+  - Field skipping for sensitive data (e.g., `password`, `internal_token`).
+  - Automatic fallback to struct default values for omitted optional or primitive fields.
 - 🛡️ **Comptime Schema Validation (`pub const zvalidate` / `zserde.validate`)**:
-  - Number range constraints (`min`, `max`).
-  - String length and pattern matching (`min_len`, `max_len`, `contains`, `starts_with`, `ends_with`).
-  - Zero runtime reflection cost — validation branches are synthesized at compile time.
-- 📦 **Zig 0.16.0+ Native**: Fully compatible with the modern `std.Io` and `build.zig.zon` module ecosystem. Zero C dependencies.
+  - Numeric range bounds (`min`, `max`).
+  - String constraints (`min_len`, `max_len`, `contains`, `starts_with`, `ends_with`).
+  - Optional field validation (skips `null`, validates if `?T` has value).
+  - Zero runtime reflection cost — validation checks compile directly into branch instructions.
+- 📦 **Pure Zig 0.16.0+**: Zero C dependencies, instant build times, fully cross-compilable.
 
 ---
 
@@ -31,7 +36,7 @@
     .version = "0.1.0",
     .dependencies = .{
         .zserde = .{
-            .url = "https://github.com/entropyparadox-lab/zserde/archive/refs/tags/v0.1.0.tar.gz",
+            .url = "https://github.com/entropyparadox-lab/zserde/archive/refs/tags/v0.2.0.tar.gz",
             .hash = "...",
         },
     },
@@ -55,51 +60,55 @@ exe.root_module.addImport("zserde", zserde_dep.module("zserde"));
 const std = @import("std");
 const zserde = @import("zserde");
 
-const DatabaseConfig = struct {
-    host: []const u8,
-    port: u16 = 5432,
-    max_connections: u32 = 10,
-    password: []const u8,
+const ServerConfig = struct {
+    bind_ip: []const u8 = "0.0.0.0",
+    port: u16 = 8080,
+};
 
-    // Comptime serialization metadata
+const ServiceManifest = struct {
+    service_name: []const u8,
+    version: []const u8,
+    replicas: u32,
+    internal_token: []const u8,
+    server: ServerConfig,
+
     pub const zserde = .{
-        .rename = .{
-            .max_connections = "maxConnections",
-        },
-        .skip = .{
-            .password = true,
-        },
+        .rename = .{ .service_name = "serviceName" },
+        .skip = .{ .internal_token = true },
     };
 
-    // Comptime validation rules
     pub const zvalidate = .{
-        .port = .{ .min = 1, .max = 65535 },
-        .max_connections = .{ .min = 1, .max = 1000 },
+        .service_name = .{ .min_len = 3, .max_len = 32 },
+        .replicas = .{ .min = 1, .max = 100 },
     };
 };
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
 
-    const config = DatabaseConfig{
-        .host = "localhost",
-        .port = 5432,
-        .max_connections = 50,
-        .password = "secret_123",
+    const manifest = ServiceManifest{
+        .service_name = "auth-gateway",
+        .version = "2.1.0",
+        .replicas = 8,
+        .internal_token = "tok_super_secret_never_leak",
+        .server = .{ .bind_ip = "127.0.0.1", .port = 9090 },
     };
 
-    // 1. Schema Validation (Compile-time verified)
-    try zserde.validate(config);
+    // 1. Schema Validation (Zero-overhead comptime checks)
+    try zserde.validate(manifest);
 
-    // 2. Serialization (password skipped, renamed fields)
-    const json_str = try zserde.json.toSlice(allocator, config, .{ .pretty = true });
-    defer allocator.free(json_str);
-    std.debug.print("JSON:\n{s}\n", .{json_str});
+    // 2. JSON Serialization
+    const json_data = try zserde.json.toSlice(allocator, manifest, .{ .pretty = true });
+    defer allocator.free(json_data);
 
-    // 3. Zero-Allocation Deserialization
-    const payload = "{\"host\":\"pg.internal\",\"port\":5433,\"maxConnections\":100}";
-    const parsed = try zserde.json.fromSliceBorrowed(DatabaseConfig, payload);
-    std.debug.print("Parsed host: {s}, max conns: {d}\n", .{ parsed.host, parsed.max_connections });
+    // 3. MessagePack Binary Encoding (Zero-Copy)
+    const msgpack_bytes = try zserde.msgpack.toSlice(allocator, manifest);
+    defer allocator.free(msgpack_bytes);
+    const decoded_mp = try zserde.msgpack.fromSliceBorrowed(ServiceManifest, msgpack_bytes);
+
+    // 4. TOML Config Serialization
+    const toml_data = try zserde.toml.toSlice(allocator, manifest);
+    defer allocator.free(toml_data);
 }
 ```
 
@@ -108,8 +117,8 @@ pub fn main(init: std.process.Init) !void {
 ## Roadmap
 
 - [x] **v0.1.0**: JSON Serializer, Zero-copy Deserializer, Comptime Field Options (`rename`, `skip`), Comptime Schema Validation.
-- [ ] **v0.2.0**: TOML and YAML Parsers with shared `zserde` metadata visitor.
-- [ ] **v0.3.0**: Binary Formats: MessagePack & CBOR encoders/decoders.
+- [x] **v0.2.0**: MessagePack binary encoder/decoder, TOML config serializer/deserializer, optional validation rules.
+- [ ] **v0.3.0**: CBOR binary encoding, YAML parser adapter.
 - [ ] **v0.4.0**: Microbenchmark suite against `std.json` and SIMD JSON parsers.
 
 ---

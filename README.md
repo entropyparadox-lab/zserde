@@ -30,7 +30,7 @@
 ### 1. Fetch package into `build.zig.zon`
 
 ```bash
-zig fetch --save https://github.com/entropyparadox-lab/zserde/archive/refs/tags/v1.0.0.tar.gz
+zig fetch --save https://github.com/entropyparadox-lab/zserde/archive/refs/tags/v1.0.1.tar.gz
 ```
 
 ### 2. Add module in your `build.zig`

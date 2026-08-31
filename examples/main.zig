@@ -32,12 +32,12 @@ pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
 
     std.debug.print("\n=================================================================================\n", .{});
-    std.debug.print("  ⚡ zserde v1.0.0: Unified Multi-Format Serialization & Validation for Zig\n", .{});
+    std.debug.print("  ⚡ zserde v1.0.1: Unified Multi-Format Serialization & Validation for Zig\n", .{});
     std.debug.print("=================================================================================\n\n", .{});
 
     const manifest = ServiceManifest{
         .service_name = "auth-gateway",
-        .version = "1.0.0",
+        .version = "1.0.1",
         .replicas = 8,
         .internal_token = "tok_super_secret_never_leak",
         .server = .{

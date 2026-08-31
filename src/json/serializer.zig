@@ -20,7 +20,7 @@ pub const BufferWriter = struct {
 };
 
 pub fn serializeToWriter(value: anytype, writer: anytype, options: SerializeOptions) !void {
-    try serializeValue(value, writer, options, 0);
+    try serializeValue(value, writer, options, 0, null);
 }
 
 pub fn serialize(allocator: std.mem.Allocator, value: anytype, options: SerializeOptions) ![]u8 {
@@ -36,6 +36,24 @@ pub fn serialize(allocator: std.mem.Allocator, value: anytype, options: Serializ
     return buffer.toOwnedSlice(allocator);
 }
 
+pub fn serializeWithConfig(
+    allocator: std.mem.Allocator,
+    value: anytype,
+    options: SerializeOptions,
+    comptime config: anytype,
+) ![]u8 {
+    var buffer: std.ArrayList(u8) = .empty;
+    errdefer buffer.deinit(allocator);
+
+    var bw = BufferWriter{
+        .list = &buffer,
+        .allocator = allocator,
+    };
+    try serializeValue(value, &bw, options, 0, config);
+
+    return buffer.toOwnedSlice(allocator);
+}
+
 fn writeIndent(writer: anytype, depth: usize, options: SerializeOptions) !void {
     if (!options.pretty) return;
     try writer.writeByte('\n');
@@ -45,7 +63,13 @@ fn writeIndent(writer: anytype, depth: usize, options: SerializeOptions) !void {
     }
 }
 
-fn serializeValue(value: anytype, writer: anytype, options: SerializeOptions, depth: usize) !void {
+fn serializeValue(
+    value: anytype,
+    writer: anytype,
+    options: SerializeOptions,
+    depth: usize,
+    comptime config_override: anytype,
+) !void {
     const T = @TypeOf(value);
     const info = @typeInfo(T);
 
@@ -68,7 +92,7 @@ fn serializeValue(value: anytype, writer: anytype, options: SerializeOptions, de
         },
         .optional => {
             if (value) |unwrapped| {
-                try serializeValue(unwrapped, writer, options, depth);
+                try serializeValue(unwrapped, writer, options, depth, config_override);
             } else {
                 try writer.writeAll("null");
             }
@@ -82,15 +106,13 @@ fn serializeValue(value: anytype, writer: anytype, options: SerializeOptions, de
             switch (ptr_info.size) {
                 .slice => {
                     if (ptr_info.child == u8) {
-                        // String slice
                         try serializeString(value, writer);
                     } else {
-                        // Array of items
-                        try serializeArray(value, writer, options, depth);
+                        try serializeArray(value, writer, options, depth, config_override);
                     }
                 },
                 .one => {
-                    try serializeValue(value.*, writer, options, depth);
+                    try serializeValue(value.*, writer, options, depth, config_override);
                 },
                 else => @compileError("Unsupported pointer type in serialization: " ++ @typeName(T)),
             }
@@ -99,11 +121,11 @@ fn serializeValue(value: anytype, writer: anytype, options: SerializeOptions, de
             if (arr_info.child == u8) {
                 try serializeString(&value, writer);
             } else {
-                try serializeArray(&value, writer, options, depth);
+                try serializeArray(&value, writer, options, depth, config_override);
             }
         },
         .@"struct" => {
-            try serializeStruct(value, writer, options, depth);
+            try serializeStruct(value, writer, options, depth, config_override);
         },
         .@"union" => |union_info| {
             if (union_info.tag_type == null) {
@@ -114,7 +136,7 @@ fn serializeValue(value: anytype, writer: anytype, options: SerializeOptions, de
                     try writer.writeAll("{\"");
                     try writer.writeAll(@tagName(tag));
                     try writer.writeAll("\":");
-                    try serializeValue(tag_val, writer, options, depth + 1);
+                    try serializeValue(tag_val, writer, options, depth + 1, config_override);
                     try writer.writeByte('}');
                 },
             }
@@ -148,14 +170,20 @@ fn serializeString(str: []const u8, writer: anytype) !void {
     try writer.writeByte('"');
 }
 
-fn serializeArray(slice: anytype, writer: anytype, options: SerializeOptions, depth: usize) !void {
+fn serializeArray(
+    slice: anytype,
+    writer: anytype,
+    options: SerializeOptions,
+    depth: usize,
+    comptime config_override: anytype,
+) !void {
     try writer.writeByte('[');
     for (slice, 0..) |item, i| {
         if (i > 0) {
             try writer.writeByte(',');
         }
         try writeIndent(writer, depth + 1, options);
-        try serializeValue(item, writer, options, depth + 1);
+        try serializeValue(item, writer, options, depth + 1, config_override);
     }
     if (slice.len > 0) {
         try writeIndent(writer, depth, options);
@@ -163,7 +191,13 @@ fn serializeArray(slice: anytype, writer: anytype, options: SerializeOptions, de
     try writer.writeByte(']');
 }
 
-fn serializeStruct(s: anytype, writer: anytype, options: SerializeOptions, depth: usize) !void {
+fn serializeStruct(
+    s: anytype,
+    writer: anytype,
+    options: SerializeOptions,
+    depth: usize,
+    comptime config_override: anytype,
+) !void {
     const T = @TypeOf(s);
     const fields = std.meta.fields(T);
 
@@ -171,9 +205,13 @@ fn serializeStruct(s: anytype, writer: anytype, options: SerializeOptions, depth
     var written_fields: usize = 0;
 
     inline for (fields) |f| {
-        const field_opts = meta.getFieldOptions(T, f.name);
+        const field_opts = comptime if (@TypeOf(config_override) != @TypeOf(null))
+            meta.getFieldOptionsWithOverride(T, f.name, config_override)
+        else
+            meta.getFieldOptions(T, f.name);
+
         if (!field_opts.skip) {
-            const key_name = meta.getFieldName(T, f);
+            const key_name = comptime if (field_opts.rename) |r| r else f.name;
             const val = @field(s, f.name);
 
             if (written_fields > 0) {
@@ -187,7 +225,7 @@ fn serializeStruct(s: anytype, writer: anytype, options: SerializeOptions, depth
                 try writer.writeByte(' ');
             }
 
-            try serializeValue(val, writer, options, depth + 1);
+            try serializeValue(val, writer, options, depth + 1, null);
             written_fields += 1;
         }
     }

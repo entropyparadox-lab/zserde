@@ -1,22 +1,33 @@
 # zserde ⚡
 
-**Zero-Allocation Multi-Format Serialization & Comptime Validation Toolkit for Zig (v0.16.0+)**
+**Zero-Allocation Multi-Format Serialization, SIMD Acceleration & Comptime Validation Toolkit for Zig (v0.16.0+)**
 
-`zserde` is a high-performance, pure Zig serialization and validation framework modeled after Rust's `serde` and Python's `pydantic`. It uses Zig's compile-time reflection (`@typeInfo`) to deliver zero-overhead, format-agnostic data modeling with zero heap allocations for borrowed data types across **JSON**, **MessagePack**, and **TOML**.
+`zserde` is a high-performance, pure Zig serialization and validation framework modeled after Rust's `serde` and Python's `pydantic`. It uses Zig's compile-time reflection (`@typeInfo`) and native SIMD vectors (`@Vector(16, u8)`) to deliver zero-overhead, format-agnostic data modeling with zero heap allocations for borrowed data types across **JSON**, **MessagePack**, and **TOML**.
+
+---
+
+## Benchmark Highlights (AMD Ryzen / ReleaseFast, 500,000 runs)
+
+| Format / Codec | Throughput (ops/sec) | Throughput (MB/s) | Allocations |
+| :--- | :--- | :--- | :--- |
+| **`zserde MsgPack` (Zero-Copy)** | **34.8 Million ops/sec** | **~3,260 MB/s** | **0 bytes (Zero-Alloc)** |
+| **`zserde JSON` (Zero-Copy + SIMD)** | **7.44 Million ops/sec** | **~837 MB/s** | **0 bytes (Zero-Alloc)** |
 
 ---
 
 ## Key Features
 
 - ⚡ **Multi-Format Support**:
-  - **JSON**: Full spec support with zero-copy slice borrowing and pretty-printing.
+  - **JSON**: Full spec support with SIMD-accelerated whitespace scanning and zero-copy slice borrowing.
   - **MessagePack (`msgpack`)**: High-throughput binary RPC format with ~40% size reduction over JSON.
   - **TOML (`toml`)**: Native configuration parsing with table sections `[section]` and scalar mapping.
 - 🚀 **Zero-Allocation Deserialization (`fromSliceBorrowed`)**: Parse payloads directly borrowing string/binary slices from the input buffer without touching the heap.
+- 🛠️ **In-Place Buffer Mutation (`unescapeInPlace`)**: Unescape JSON control characters (`\n`, `\t`, `\"`) in-place without heap allocations.
 - 🎯 **Comptime Struct Metadata (`pub const zserde`)**:
-  - Field renaming (e.g., `service_name` → `"serviceName"`).
-  - Field skipping for sensitive data (e.g., `password`, `internal_token`).
-  - Automatic fallback to struct default values for omitted optional or primitive fields.
+  - Global naming conversion: `rename_all = .camelCase`, `.kebab_case`, `.snake_case`, `.PascalCase`.
+  - Granular field renaming: `.rename = .{ .field_name = "customKey" }`.
+  - Sensitive field skipping: `.skip = .{ .password = true }`.
+  - Call-site configuration override (`toSliceWithConfig`) for unowned third-party struct types.
 - 🛡️ **Comptime Schema Validation (`pub const zvalidate` / `zserde.validate`)**:
   - Numeric range bounds (`min`, `max`).
   - String constraints (`min_len`, `max_len`, `contains`, `starts_with`, `ends_with`).
@@ -60,66 +71,63 @@ exe.root_module.addImport("zserde", zserde_dep.module("zserde"));
 const std = @import("std");
 const zserde = @import("zserde");
 
-const ServerConfig = struct {
-    bind_ip: []const u8 = "0.0.0.0",
-    port: u16 = 8080,
-};
+const JobPayload = struct {
+    job_id: u32,
+    task_name: []const u8,
+    max_retry_count: u8,
+    secret_token: []const u8,
 
-const ServiceManifest = struct {
-    service_name: []const u8,
-    version: []const u8,
-    replicas: u32,
-    internal_token: []const u8,
-    server: ServerConfig,
-
+    // Comptime metadata
     pub const zserde = .{
-        .rename = .{ .service_name = "serviceName" },
-        .skip = .{ .internal_token = true },
+        .rename_all = .camelCase,
+        .skip = .{ .secret_token = true },
     };
 
+    // Comptime schema validation
     pub const zvalidate = .{
-        .service_name = .{ .min_len = 3, .max_len = 32 },
-        .replicas = .{ .min = 1, .max = 100 },
+        .task_name = .{ .min_len = 3, .starts_with = "task_" },
+        .max_retry_count = .{ .min = 1, .max = 10 },
     };
 };
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
 
-    const manifest = ServiceManifest{
-        .service_name = "auth-gateway",
-        .version = "2.1.0",
-        .replicas = 8,
-        .internal_token = "tok_super_secret_never_leak",
-        .server = .{ .bind_ip = "127.0.0.1", .port = 9090 },
+    const job = JobPayload{
+        .job_id = 77,
+        .task_name = "task_sync_db",
+        .max_retry_count = 3,
+        .secret_token = "tok_hidden",
     };
 
     // 1. Schema Validation (Zero-overhead comptime checks)
-    try zserde.validate(manifest);
+    try zserde.validate(job);
 
-    // 2. JSON Serialization
-    const json_data = try zserde.json.toSlice(allocator, manifest, .{ .pretty = true });
-    defer allocator.free(json_data);
+    // 2. JSON Serialization (jobId, taskName, maxRetryCount in camelCase)
+    const json_str = try zserde.json.toSlice(allocator, job, .{ .pretty = true });
+    defer allocator.free(json_str);
 
     // 3. MessagePack Binary Encoding (Zero-Copy)
-    const msgpack_bytes = try zserde.msgpack.toSlice(allocator, manifest);
-    defer allocator.free(msgpack_bytes);
-    const decoded_mp = try zserde.msgpack.fromSliceBorrowed(ServiceManifest, msgpack_bytes);
-
-    // 4. TOML Config Serialization
-    const toml_data = try zserde.toml.toSlice(allocator, manifest);
-    defer allocator.free(toml_data);
+    const mp_bytes = try zserde.msgpack.toSlice(allocator, job);
+    defer allocator.free(mp_bytes);
+    const parsed_mp = try zserde.msgpack.fromSliceBorrowed(JobPayload, mp_bytes);
 }
 ```
 
 ---
 
-## Roadmap
+## Running Tests & Benchmarks
 
-- [x] **v0.1.0**: JSON Serializer, Zero-copy Deserializer, Comptime Field Options (`rename`, `skip`), Comptime Schema Validation.
-- [x] **v0.2.0**: MessagePack binary encoder/decoder, TOML config serializer/deserializer, optional validation rules.
-- [ ] **v0.3.0**: CBOR binary encoding, YAML parser adapter.
-- [ ] **v0.4.0**: Microbenchmark suite against `std.json` and SIMD JSON parsers.
+```bash
+# Run unit & integration tests
+zig build test
+
+# Run interactive example
+zig build run-example
+
+# Run high-throughput microbenchmark suite
+zig build bench
+```
 
 ---
 

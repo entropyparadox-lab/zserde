@@ -15,6 +15,15 @@ pub const json = struct {
         return serializer.serialize(allocator, value, options);
     }
 
+    pub fn toSliceWithConfig(
+        allocator: std.mem.Allocator,
+        value: anytype,
+        options: SerializeOptions,
+        comptime config: anytype,
+    ) ![]u8 {
+        return serializer.serializeWithConfig(allocator, value, options, config);
+    }
+
     pub fn toWriter(value: anytype, writer: anytype, options: SerializeOptions) !void {
         return serializer.serializeToWriter(value, writer, options);
     }
@@ -25,6 +34,10 @@ pub const json = struct {
 
     pub fn fromSliceBorrowed(comptime T: type, input: []const u8) !T {
         return deserializer.deserializeBorrowed(T, input);
+    }
+
+    pub fn unescapeInPlace(buf: []u8) ![]u8 {
+        return deserializer.unescapeInPlace(buf);
     }
 };
 
@@ -99,6 +112,100 @@ test "zserde: JSON serialization, deserialization, skip, rename" {
     try testing.expectEqual(@as(u64, 101), parsed.id);
     try testing.expectEqualStrings("Alice", parsed.name);
     try testing.expectEqual(true, parsed.is_active);
+}
+
+test "zserde: rename_all = .camelCase automatic conversion across JSON & MsgPack" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const JobPayload = struct {
+        job_id: u32,
+        task_name: []const u8,
+        max_retry_count: u8,
+
+        pub const zserde = .{
+            .rename_all = .camelCase,
+        };
+    };
+
+    const job = JobPayload{
+        .job_id = 77,
+        .task_name = "sync_database",
+        .max_retry_count = 3,
+    };
+
+    // JSON
+    const json_str = try json.toSlice(allocator, job, .{});
+    defer allocator.free(json_str);
+
+    try testing.expect(std.mem.indexOf(u8, json_str, "\"jobId\":77") != null);
+    try testing.expect(std.mem.indexOf(u8, json_str, "\"taskName\":\"sync_database\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json_str, "\"maxRetryCount\":3") != null);
+
+    const parsed_json = try json.fromSliceBorrowed(JobPayload, json_str);
+    try testing.expectEqual(@as(u32, 77), parsed_json.job_id);
+    try testing.expectEqualStrings("sync_database", parsed_json.task_name);
+    try testing.expectEqual(@as(u8, 3), parsed_json.max_retry_count);
+
+    // MsgPack
+    const mp_bytes = try msgpack.toSlice(allocator, job);
+    defer allocator.free(mp_bytes);
+    const parsed_mp = try msgpack.fromSliceBorrowed(JobPayload, mp_bytes);
+    try testing.expectEqual(@as(u32, 77), parsed_mp.job_id);
+    try testing.expectEqualStrings("sync_database", parsed_mp.task_name);
+}
+
+test "zserde: Call-site configuration override without modifying struct" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    // Unowned third party struct (no pub const zserde)
+    const ThirdPartyItem = struct {
+        item_code: []const u8,
+        stock_count: u32,
+    };
+
+    const item = ThirdPartyItem{
+        .item_code = "SKU-990",
+        .stock_count = 150,
+    };
+
+    const json_str = try json.toSliceWithConfig(allocator, item, .{}, .{
+        .rename_all = .camelCase,
+    });
+    defer allocator.free(json_str);
+
+    try testing.expect(std.mem.indexOf(u8, json_str, "\"itemCode\":\"SKU-990\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json_str, "\"stockCount\":150") != null);
+}
+
+test "zserde: In-place zero-copy unescaping of JSON strings" {
+    const testing = std.testing;
+
+    var escaped_buffer = "hello\\nworld\\t\\\"test\\\"".*;
+    const unescaped = try json.unescapeInPlace(&escaped_buffer);
+
+    try testing.expectEqualStrings("hello\nworld\t\"test\"", unescaped);
+}
+
+test "zserde: SIMD whitespace scanning across large padded payloads" {
+    const testing = std.testing;
+
+    const LargePadding = struct {
+        status: []const u8,
+        count: u32,
+    };
+
+    const padded_json =
+        \\{
+        \\                "status": "healthy",
+        \\                "count": 1000
+        \\}
+    ;
+
+    const parsed = try json.fromSliceBorrowed(LargePadding, padded_json);
+    try testing.expectEqualStrings("healthy", parsed.status);
+    try testing.expectEqual(@as(u32, 1000), parsed.count);
 }
 
 test "zserde: MsgPack binary zero-copy roundtrip" {

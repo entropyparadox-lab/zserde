@@ -26,7 +26,41 @@ pub const Deserializer = struct {
         return self.input[self.pos];
     }
 
-    fn skipWhitespace(self: *Deserializer) void {
+    pub fn skipWhitespace(self: *Deserializer) void {
+        // 1. SIMD accelerated path for 16-byte chunks
+        const Vec16 = @Vector(16, u8);
+        const space_v: Vec16 = @splat(' ');
+        const tab_v: Vec16 = @splat('\t');
+        const nl_v: Vec16 = @splat('\n');
+        const cr_v: Vec16 = @splat('\r');
+
+        while (self.pos + 16 <= self.input.len) {
+            const chunk: Vec16 = self.input[self.pos..][0..16].*;
+            const is_space = chunk == space_v;
+            const is_tab = chunk == tab_v;
+            const is_nl = chunk == nl_v;
+            const is_cr = chunk == cr_v;
+            const is_ws = is_space | is_tab | is_nl | is_cr;
+
+            if (@reduce(.And, is_ws)) {
+                self.pos += 16;
+            } else {
+                var i: usize = 0;
+                while (i < 16) : (i += 1) {
+                    switch (self.input[self.pos + i]) {
+                        ' ', '\t', '\n', '\r' => {},
+                        else => {
+                            self.pos += i;
+                            return;
+                        },
+                    }
+                }
+                self.pos += 16;
+                return;
+            }
+        }
+
+        // 2. Scalar fallback for tail bytes
         while (self.pos < self.input.len) {
             switch (self.input[self.pos]) {
                 ' ', '\t', '\n', '\r' => self.pos += 1,
@@ -51,6 +85,24 @@ pub const Deserializer = struct {
     pub fn parseStringBorrowed(self: *Deserializer) ![]const u8 {
         try self.expectChar('"');
         const start = self.pos;
+
+        // SIMD accelerated search for quotes and escapes
+        const Vec16 = @Vector(16, u8);
+        const quote_v: Vec16 = @splat('"');
+        const esc_v: Vec16 = @splat('\\');
+
+        while (self.pos + 16 <= self.input.len) {
+            const chunk: Vec16 = self.input[self.pos..][0..16].*;
+            const is_quote = chunk == quote_v;
+            const is_esc = chunk == esc_v;
+            const has_special = is_quote | is_esc;
+
+            if (@reduce(.Or, has_special)) {
+                break;
+            }
+            self.pos += 16;
+        }
+
         while (self.pos < self.input.len) {
             const c = self.input[self.pos];
             if (c == '\\') {
@@ -237,7 +289,6 @@ pub const Deserializer = struct {
             }
 
             if (!matched) {
-                // Skip unknown value
                 try self.skipArbitraryValue();
             }
 
@@ -317,6 +368,36 @@ pub const Deserializer = struct {
         }
     }
 };
+
+pub fn unescapeInPlace(buf: []u8) ![]u8 {
+    var read_idx: usize = 0;
+    var write_idx: usize = 0;
+
+    while (read_idx < buf.len) {
+        if (buf[read_idx] == '\\') {
+            read_idx += 1;
+            if (read_idx >= buf.len) return DeserializeError.InvalidEscape;
+            switch (buf[read_idx]) {
+                '"' => buf[write_idx] = '"',
+                '\\' => buf[write_idx] = '\\',
+                '/' => buf[write_idx] = '/',
+                'n' => buf[write_idx] = '\n',
+                'r' => buf[write_idx] = '\r',
+                't' => buf[write_idx] = '\t',
+                'b' => buf[write_idx] = 0x08,
+                'f' => buf[write_idx] = 0x0C,
+                else => return DeserializeError.InvalidEscape,
+            }
+            write_idx += 1;
+            read_idx += 1;
+        } else {
+            buf[write_idx] = buf[read_idx];
+            write_idx += 1;
+            read_idx += 1;
+        }
+    }
+    return buf[0..write_idx];
+}
 
 pub fn deserialize(comptime T: type, allocator: std.mem.Allocator, input: []const u8) !T {
     var de = Deserializer.init(input);

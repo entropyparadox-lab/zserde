@@ -36,4 +36,21 @@ pub fn build(b: *std.Build) void {
     const run_example = b.addRunArtifact(example_exe);
     const example_step = b.step("run-example", "Run zserde example application");
     example_step.dependOn(&run_example.step);
+
+    // 4. Benchmarking executable (ReleaseFast by default)
+    const bench_mod = b.createModule(.{
+        .root_source_file = b.path("tests/benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    bench_mod.addImport("zserde", zserde_mod);
+
+    const bench_exe = b.addExecutable(.{
+        .name = "zserde-bench",
+        .root_module = bench_mod,
+    });
+
+    const run_bench = b.addRunArtifact(bench_exe);
+    const bench_step = b.step("bench", "Run zserde performance benchmark suite");
+    bench_step.dependOn(&run_bench.step);
 }

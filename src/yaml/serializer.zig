@@ -52,12 +52,20 @@ fn serializeStruct(s: anytype, writer: anytype, depth: usize) !void {
         if (!opts.skip) {
             const key_name = if (opts.rename) |r| r else f.name;
             const val = @field(s, f.name);
+            const field_info = @typeInfo(f.type);
 
-            if (@typeInfo(f.type) == .@"struct") {
+            if (field_info == .@"struct") {
                 try writeIndent(writer, depth);
                 try writer.writeAll(key_name);
                 try writer.writeAll(":\n");
                 try serializeStruct(val, writer, depth + 1);
+            } else if (field_info == .optional and @typeInfo(field_info.optional.child) == .@"struct") {
+                if (val) |unwrapped| {
+                    try writeIndent(writer, depth);
+                    try writer.writeAll(key_name);
+                    try writer.writeAll(":\n");
+                    try serializeStruct(unwrapped, writer, depth + 1);
+                }
             } else {
                 try writeIndent(writer, depth);
                 try writer.writeAll(key_name);

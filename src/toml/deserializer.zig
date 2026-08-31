@@ -73,19 +73,30 @@ pub const Deserializer = struct {
             self.skipWhitespaceAndComments();
 
             if (current_section) |sec| {
-                // Match nested struct field
+                // Match nested struct field (direct or optional)
                 inline for (fields, 0..) |f, i| {
                     const target_sec = meta.getFieldName(T, f);
-                    if (@typeInfo(f.type) == .@"struct" and std.mem.eql(u8, sec, target_sec)) {
+                    const field_info = @typeInfo(f.type);
+                    const is_direct_struct = (field_info == .@"struct");
+                    const is_optional_struct = (field_info == .optional and @typeInfo(field_info.optional.child) == .@"struct");
+
+                    if ((is_direct_struct or is_optional_struct) and std.mem.eql(u8, sec, target_sec)) {
+                        const ChildType = if (is_direct_struct) f.type else field_info.optional.child;
                         if (!field_set.isSet(i)) {
-                            @field(result, f.name) = std.mem.zeroes(f.type);
+                            @field(result, f.name) = std.mem.zeroes(ChildType);
                             field_set.set(i);
                         }
-                        const child_fields = std.meta.fields(f.type);
+                        const child_fields = std.meta.fields(ChildType);
                         inline for (child_fields) |cf| {
-                            const c_name = meta.getFieldName(f.type, cf);
+                            const c_name = meta.getFieldName(ChildType, cf);
                             if (std.mem.eql(u8, key, c_name)) {
-                                @field(@field(result, f.name), cf.name) = try self.parseValue(cf.type, allocator);
+                                if (is_direct_struct) {
+                                    @field(@field(result, f.name), cf.name) = try self.parseValue(cf.type, allocator);
+                                } else {
+                                    var curr = @field(result, f.name) orelse std.mem.zeroes(ChildType);
+                                    @field(curr, cf.name) = try self.parseValue(cf.type, allocator);
+                                    @field(result, f.name) = curr;
+                                }
                             }
                         }
                     }
@@ -94,7 +105,10 @@ pub const Deserializer = struct {
                 // Top-level key
                 inline for (fields, 0..) |f, i| {
                     const target_name = meta.getFieldName(T, f);
-                    if (@typeInfo(f.type) != .@"struct" and std.mem.eql(u8, key, target_name)) {
+                    const field_info = @typeInfo(f.type);
+                    const is_struct = (field_info == .@"struct" or (field_info == .optional and @typeInfo(field_info.optional.child) == .@"struct"));
+
+                    if (!is_struct and std.mem.eql(u8, key, target_name)) {
                         @field(result, f.name) = try self.parseValue(f.type, allocator);
                         field_set.set(i);
                     }

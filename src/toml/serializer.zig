@@ -43,7 +43,10 @@ fn serializeStruct(s: anytype, writer: anytype) !void {
     // 1. First pass: write simple scalar fields
     inline for (fields) |f| {
         const opts = meta.getFieldOptions(T, f.name);
-        if (!opts.skip and @typeInfo(f.type) != .@"struct") {
+        const field_info = @typeInfo(f.type);
+        const is_struct = (field_info == .@"struct" or (field_info == .optional and @typeInfo(field_info.optional.child) == .@"struct"));
+
+        if (!opts.skip and !is_struct) {
             const key_name = meta.getFieldName(T, f);
             const val = @field(s, f.name);
 
@@ -57,27 +60,39 @@ fn serializeStruct(s: anytype, writer: anytype) !void {
     // 2. Second pass: write nested sections [section]
     inline for (fields) |f| {
         const opts = meta.getFieldOptions(T, f.name);
-        if (!opts.skip and @typeInfo(f.type) == .@"struct") {
+        const field_info = @typeInfo(f.type);
+        const is_direct_struct = (field_info == .@"struct");
+        const is_optional_struct = (field_info == .optional and @typeInfo(field_info.optional.child) == .@"struct");
+
+        if (!opts.skip and (is_direct_struct or is_optional_struct)) {
             const section_name = meta.getFieldName(T, f);
             const val = @field(s, f.name);
 
-            try writer.writeByte('\n');
-            try writer.writeByte('[');
-            try writer.writeAll(section_name);
-            try writer.writeAll("]\n");
-
-            const child_fields = std.meta.fields(f.type);
-            inline for (child_fields) |cf| {
-                const copts = meta.getFieldOptions(f.type, cf.name);
-                if (!copts.skip) {
-                    const ckey = meta.getFieldName(f.type, cf);
-                    const cval = @field(val, cf.name);
-                    try writer.writeAll(ckey);
-                    try writer.writeAll(" = ");
-                    try serializeValue(cval, writer);
-                    try writer.writeByte('\n');
-                }
+            if (is_direct_struct) {
+                try writeSection(f.type, section_name, val, writer);
+            } else if (val) |unwrapped| {
+                try writeSection(field_info.optional.child, section_name, unwrapped, writer);
             }
+        }
+    }
+}
+
+fn writeSection(comptime StructType: type, section_name: []const u8, val: anytype, writer: anytype) !void {
+    try writer.writeByte('\n');
+    try writer.writeByte('[');
+    try writer.writeAll(section_name);
+    try writer.writeAll("]\n");
+
+    const child_fields = std.meta.fields(StructType);
+    inline for (child_fields) |cf| {
+        const copts = meta.getFieldOptions(StructType, cf.name);
+        if (!copts.skip) {
+            const ckey = meta.getFieldName(StructType, cf);
+            const cval = @field(val, cf.name);
+            try writer.writeAll(ckey);
+            try writer.writeAll(" = ");
+            try serializeValue(cval, writer);
+            try writer.writeByte('\n');
         }
     }
 }
@@ -99,6 +114,9 @@ fn serializeValue(value: anytype, writer: anytype) !void {
             var buf: [64]u8 = undefined;
             const str = try std.fmt.bufPrint(&buf, "{d}", .{value});
             try writer.writeAll(str);
+        },
+        .null => {
+            try writer.writeAll("\"\"");
         },
         .optional => {
             if (value) |unwrapped| {

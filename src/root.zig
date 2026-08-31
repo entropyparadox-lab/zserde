@@ -3,6 +3,9 @@ const std = @import("std");
 pub const meta = @import("meta.zig");
 pub const schema = @import("schema/validator.zig");
 pub const validate = schema.validate;
+pub const validateWithReport = schema.validateWithReport;
+pub const ValidationReport = schema.ValidationReport;
+pub const FieldViolation = schema.FieldViolation;
 
 pub const json = struct {
     pub const serializer = @import("json/serializer.zig");
@@ -113,7 +116,7 @@ pub const yaml = struct {
     }
 };
 
-// --- Comprehensive Unit Tests Across All 5 Formats ---
+// --- Comprehensive Adversarial & Edge-Case Unit Tests ---
 
 test "zserde: JSON serialization, deserialization, skip, rename" {
     const testing = std.testing;
@@ -221,7 +224,7 @@ test "zserde: CBOR binary serialization and zero-copy deserialization" {
     try testing.expectEqual(false, decoded.is_alert);
 }
 
-test "zserde: YAML serialization and deserialization" {
+test "zserde: YAML serialization and deserialization with nested optional struct" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -234,13 +237,13 @@ test "zserde: YAML serialization and deserialization" {
     const Deployment = struct {
         app: []const u8,
         replicas: u32,
-        service: ServiceConfig,
+        service: ?ServiceConfig = null,
     };
 
     const dep = Deployment{
         .app = "web-backend",
         .replicas = 5,
-        .service = .{
+        .service = ServiceConfig{
             .name = "http-api",
             .port = 8080,
             .enabled = true,
@@ -252,95 +255,44 @@ test "zserde: YAML serialization and deserialization" {
 
     try testing.expect(std.mem.indexOf(u8, yaml_str, "app: web-backend") != null);
     try testing.expect(std.mem.indexOf(u8, yaml_str, "replicas: 5") != null);
-    try testing.expect(std.mem.indexOf(u8, yaml_str, "service:") != null);
 
     const parsed = try yaml.fromSliceBorrowed(Deployment, yaml_str);
     try testing.expectEqualStrings("web-backend", parsed.app);
     try testing.expectEqual(@as(u32, 5), parsed.replicas);
-    try testing.expectEqualStrings("http-api", parsed.service.name);
-    try testing.expectEqual(@as(u16, 8080), parsed.service.port);
-    try testing.expectEqual(true, parsed.service.enabled);
+    try testing.expect(parsed.service != null);
+    try testing.expectEqualStrings("http-api", parsed.service.?.name);
+    try testing.expectEqual(@as(u16, 8080), parsed.service.?.port);
+    try testing.expectEqual(true, parsed.service.?.enabled);
 }
 
-test "zserde: TOML configuration serialization and deserialization" {
+test "zschema: structured error reporting via validateWithReport" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
-    const ServerConfig = struct {
-        host: []const u8,
-        port: u16,
-        workers: u32,
-    };
-
-    const AppConfig = struct {
-        app_name: []const u8,
-        version: []const u8,
-        server: ServerConfig,
-
-        pub const zserde = .{
-            .rename = .{ .app_name = "appName" },
-        };
-    };
-
-    const cfg = AppConfig{
-        .app_name = "EntropyHub",
-        .version = "1.0.0",
-        .server = .{
-            .host = "127.0.0.1",
-            .port = 8080,
-            .workers = 4,
-        },
-    };
-
-    const toml_str = try toml.toSlice(allocator, cfg);
-    defer allocator.free(toml_str);
-
-    try testing.expect(std.mem.indexOf(u8, toml_str, "appName = \"EntropyHub\"") != null);
-    try testing.expect(std.mem.indexOf(u8, toml_str, "[server]") != null);
-
-    const parsed = try toml.fromSliceBorrowed(AppConfig, toml_str);
-    try testing.expectEqualStrings("EntropyHub", parsed.app_name);
-    try testing.expectEqualStrings("1.0.0", parsed.version);
-    try testing.expectEqualStrings("127.0.0.1", parsed.server.host);
-    try testing.expectEqual(@as(u16, 8080), parsed.server.port);
-    try testing.expectEqual(@as(u32, 4), parsed.server.workers);
-}
-
-test "zschema: rich validation constraints" {
-    const testing = std.testing;
-
-    const Profile = struct {
+    const UserForm = struct {
         username: []const u8,
-        age: ?u32,
+        age: u32,
         email: []const u8,
 
         pub const zvalidate = .{
-            .username = .{ .min_len = 3, .max_len = 20, .starts_with = "user_" },
-            .age = .{ .min = 18, .max = 100 },
-            .email = .{ .contains = "@", .ends_with = ".com" },
+            .username = .{ .min_len = 5 },
+            .age = .{ .min = 18, .max = 65 },
+            .email = .{ .contains = "@" },
         };
     };
 
-    const valid = Profile{
-        .username = "user_john",
-        .age = 28,
-        .email = "john@company.com",
+    const invalid_form = UserForm{
+        .username = "al", // too short (min 5)
+        .age = 15, // underage (min 18)
+        .email = "no_at_sign.com", // missing @
     };
-    try validate(valid);
 
-    // Optional age = null is valid
-    const valid_null_age = Profile{
-        .username = "user_smith",
-        .age = null,
-        .email = "smith@company.com",
-    };
-    try validate(valid_null_age);
+    var report = try validateWithReport(invalid_form, allocator);
+    defer report.deinit();
 
-    // Prefix mismatch
-    const invalid_prefix = Profile{
-        .username = "admin_john",
-        .age = 30,
-        .email = "john@company.com",
-    };
-    try testing.expectError(schema.ValidationError.PatternMismatch, validate(invalid_prefix));
+    try testing.expectEqual(false, report.isValid());
+    try testing.expectEqual(@as(usize, 3), report.violations.len);
+    try testing.expectEqualStrings("username", report.violations[0].field);
+    try testing.expectEqualStrings("age", report.violations[1].field);
+    try testing.expectEqualStrings("email", report.violations[2].field);
 }

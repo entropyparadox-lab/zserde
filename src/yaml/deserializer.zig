@@ -18,21 +18,6 @@ pub const Deserializer = struct {
         return .{ .input = input, .pos = 0 };
     }
 
-    fn skipWhitespaceAndComments(self: *Deserializer) void {
-        while (self.pos < self.input.len) {
-            const c = self.input[self.pos];
-            if (c == ' ' or c == '\t' or c == '\r' or c == '\n') {
-                self.pos += 1;
-            } else if (c == '#') {
-                while (self.pos < self.input.len and self.input[self.pos] != '\n') {
-                    self.pos += 1;
-                }
-            } else {
-                break;
-            }
-        }
-    }
-
     pub fn parseStruct(self: *Deserializer, comptime T: type, allocator: ?std.mem.Allocator) YamlError!T {
         var result: T = undefined;
         const fields = std.meta.fields(T);
@@ -75,16 +60,27 @@ pub const Deserializer = struct {
                 const parent_key = current_parent.?;
                 inline for (fields, 0..) |f, i| {
                     const target_parent = meta.getFieldName(T, f);
-                    if (@typeInfo(f.type) == .@"struct" and std.mem.eql(u8, parent_key, target_parent)) {
+                    const field_info = @typeInfo(f.type);
+                    const is_direct_struct = (field_info == .@"struct");
+                    const is_optional_struct = (field_info == .optional and @typeInfo(field_info.optional.child) == .@"struct");
+
+                    if ((is_direct_struct or is_optional_struct) and std.mem.eql(u8, parent_key, target_parent)) {
+                        const ChildType = if (is_direct_struct) f.type else field_info.optional.child;
                         if (!field_set.isSet(i)) {
-                            @field(result, f.name) = std.mem.zeroes(f.type);
+                            @field(result, f.name) = std.mem.zeroes(ChildType);
                             field_set.set(i);
                         }
-                        const child_fields = std.meta.fields(f.type);
+                        const child_fields = std.meta.fields(ChildType);
                         inline for (child_fields) |cf| {
-                            const c_name = meta.getFieldName(f.type, cf);
+                            const c_name = meta.getFieldName(ChildType, cf);
                             if (std.mem.eql(u8, key, c_name)) {
-                                @field(@field(result, f.name), cf.name) = try parsePrimitiveValue(cf.type, val_raw, allocator);
+                                if (is_direct_struct) {
+                                    @field(@field(result, f.name), cf.name) = try parsePrimitiveValue(cf.type, val_raw, allocator);
+                                } else {
+                                    var curr = @field(result, f.name) orelse std.mem.zeroes(ChildType);
+                                    @field(curr, cf.name) = try parsePrimitiveValue(cf.type, val_raw, allocator);
+                                    @field(result, f.name) = curr;
+                                }
                             }
                         }
                     }
@@ -94,7 +90,10 @@ pub const Deserializer = struct {
                 // Top-level scalar field
                 inline for (fields, 0..) |f, i| {
                     const target_name = meta.getFieldName(T, f);
-                    if (@typeInfo(f.type) != .@"struct" and std.mem.eql(u8, key, target_name)) {
+                    const field_info = @typeInfo(f.type);
+                    const is_struct = (field_info == .@"struct" or (field_info == .optional and @typeInfo(field_info.optional.child) == .@"struct"));
+
+                    if (!is_struct and std.mem.eql(u8, key, target_name)) {
                         @field(result, f.name) = try parsePrimitiveValue(f.type, val_raw, allocator);
                         field_set.set(i);
                     }

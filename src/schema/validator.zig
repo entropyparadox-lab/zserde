@@ -15,6 +15,19 @@ pub const FieldViolation = struct {
     message: []const u8,
 };
 
+pub const ValidationReport = struct {
+    violations: []const FieldViolation,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *ValidationReport) void {
+        self.allocator.free(self.violations);
+    }
+
+    pub fn isValid(self: *const ValidationReport) bool {
+        return self.violations.len == 0;
+    }
+};
+
 pub fn validate(value: anytype) ValidationError!void {
     const T = @TypeOf(value);
     const info = @typeInfo(T);
@@ -34,15 +47,54 @@ pub fn validate(value: anytype) ValidationError!void {
                 }
             }
 
-            // Also validate nested structs
+            // Recursively validate nested structs (direct, optional, or slice)
             inline for (std.meta.fields(T)) |f| {
-                if (@typeInfo(f.type) == .@"struct") {
+                const field_info = @typeInfo(f.type);
+                if (field_info == .@"struct") {
                     try validate(@field(value, f.name));
+                } else if (field_info == .optional and @typeInfo(field_info.optional.child) == .@"struct") {
+                    if (@field(value, f.name)) |unwrapped| {
+                        try validate(unwrapped);
+                    }
+                } else if (field_info == .pointer and field_info.pointer.size == .slice and @typeInfo(field_info.pointer.child) == .@"struct") {
+                    for (@field(value, f.name)) |item| {
+                        try validate(item);
+                    }
                 }
             }
         },
         else => {},
     }
+}
+
+pub fn validateWithReport(value: anytype, allocator: std.mem.Allocator) !ValidationReport {
+    var violations_list: std.ArrayList(FieldViolation) = .empty;
+    errdefer violations_list.deinit(allocator);
+
+    const T = @TypeOf(value);
+    if (@typeInfo(T) == .@"struct" and @hasDecl(T, "zvalidate")) {
+        const rules = @field(T, "zvalidate");
+        const rules_type = @TypeOf(rules);
+
+        inline for (std.meta.fields(T)) |f| {
+            if (@hasField(rules_type, f.name)) {
+                const rule = @field(rules, f.name);
+                const field_val = @field(value, f.name);
+                if (validateField(field_val, rule)) {} else |err| {
+                    try violations_list.append(allocator, .{
+                        .field = f.name,
+                        .code = err,
+                        .message = @errorName(err),
+                    });
+                }
+            }
+        }
+    }
+
+    return .{
+        .violations = try violations_list.toOwnedSlice(allocator),
+        .allocator = allocator,
+    };
 }
 
 fn validateField(val: anytype, rule: anytype) ValidationError!void {
@@ -93,7 +145,7 @@ fn validateField(val: anytype, rule: anytype) ValidationError!void {
         }
     }
 
-    // Slice / Array item validation
+    // Slice / Array item length validation
     if (val_info == .pointer and val_info.pointer.size == .slice and val_info.pointer.child != u8) {
         if (@hasField(RuleType, "min_len")) {
             if (val.len < rule.min_len) return ValidationError.StringTooShort;

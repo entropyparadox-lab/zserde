@@ -14,14 +14,9 @@ const UserPayload = struct {
     };
 };
 
-fn getMonotonicNs() u64 {
-    var ts: std.posix.timespec = undefined;
-    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts);
-    return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
-}
-
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
+    const io = init.io;
 
     const sample_json =
         \\{"id":104928,"username":"developer_alice","email":"alice@enterprise.com","isActive":true,"score":99.45,"retryCount":5}
@@ -34,7 +29,7 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("=========================================================================\n\n", .{});
 
     // 1. zserde JSON Zero-Copy Benchmark
-    var start_ns = getMonotonicNs();
+    const start_json_ts = std.Io.Clock.awake.now(io);
     var i: usize = 0;
     var dummy: u64 = 0;
 
@@ -42,8 +37,9 @@ pub fn main(init: std.process.Init) !void {
         const parsed = try zserde.json.fromSliceBorrowed(UserPayload, sample_json);
         dummy +%= parsed.id;
     }
-    const end_ns = getMonotonicNs();
-    const zserde_json_ns = end_ns - start_ns;
+    const end_json_ts = std.Io.Clock.awake.now(io);
+    const zserde_json_duration = start_json_ts.durationTo(end_json_ts);
+    const zserde_json_ns: u64 = @intCast(@max(1, zserde_json_duration.nanoseconds));
     const zserde_json_ops = (@as(f64, @floatFromInt(iterations)) / @as(f64, @floatFromInt(zserde_json_ns))) * 1_000_000_000.0;
     const zserde_json_mb = (zserde_json_ops * @as(f64, @floatFromInt(sample_json.len))) / (1024.0 * 1024.0);
 
@@ -63,14 +59,15 @@ pub fn main(init: std.process.Init) !void {
     const mp_bytes = try zserde.msgpack.toSlice(allocator, sample_user);
     defer allocator.free(mp_bytes);
 
-    start_ns = getMonotonicNs();
+    const start_mp_ts = std.Io.Clock.awake.now(io);
     i = 0;
     while (i < iterations) : (i += 1) {
         const parsed = try zserde.msgpack.fromSliceBorrowed(UserPayload, mp_bytes);
         dummy +%= parsed.id;
     }
-    const end_mp_ns = getMonotonicNs();
-    const zserde_mp_ns = end_mp_ns - start_ns;
+    const end_mp_ts = std.Io.Clock.awake.now(io);
+    const zserde_mp_duration = start_mp_ts.durationTo(end_mp_ts);
+    const zserde_mp_ns: u64 = @intCast(@max(1, zserde_mp_duration.nanoseconds));
     const zserde_mp_ops = (@as(f64, @floatFromInt(iterations)) / @as(f64, @floatFromInt(zserde_mp_ns))) * 1_000_000_000.0;
     const zserde_mp_mb = (zserde_mp_ops * @as(f64, @floatFromInt(mp_bytes.len))) / (1024.0 * 1024.0);
 

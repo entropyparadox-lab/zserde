@@ -116,7 +116,9 @@ pub const yaml = struct {
     }
 };
 
-// --- Comprehensive Adversarial & Edge-Case Unit Tests ---
+test {
+    _ = @import("edge_cases.zig");
+}
 
 test "zserde: JSON serialization, deserialization, skip, rename" {
     const testing = std.testing;

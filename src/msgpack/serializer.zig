@@ -183,7 +183,7 @@ fn serializeArray(slice: anytype, writer: anytype) !void {
 
 fn serializeStruct(s: anytype, writer: anytype) !void {
     const T = @TypeOf(s);
-    const fields = std.meta.fields(T);
+    const fields = meta.fields(T);
 
     // Count unskipped fields
     var count: usize = 0;

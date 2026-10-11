@@ -199,7 +199,7 @@ fn serializeStruct(
     comptime config_override: anytype,
 ) !void {
     const T = @TypeOf(s);
-    const fields = std.meta.fields(T);
+    const fields = meta.fields(T);
 
     try writer.writeByte('{');
     var written_fields: usize = 0;

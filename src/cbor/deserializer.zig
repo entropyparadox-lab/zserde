@@ -156,8 +156,8 @@ pub const Deserializer = struct {
         if (header.major != 5) return CborError.TypeMismatch;
 
         var result: T = undefined;
-        const fields = std.meta.fields(T);
-        var field_set = std.StaticBitSet(fields.len).initEmpty();
+        const fields = meta.fields(T);
+        var field_set: std.bit_set.Static(fields.len) = .empty;
 
         var idx: usize = 0;
         while (idx < header.len) : (idx += 1) {

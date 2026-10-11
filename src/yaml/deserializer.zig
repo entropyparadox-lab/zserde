@@ -20,8 +20,8 @@ pub const Deserializer = struct {
 
     pub fn parseStruct(self: *Deserializer, comptime T: type, allocator: ?std.mem.Allocator) YamlError!T {
         var result: T = undefined;
-        const fields = std.meta.fields(T);
-        var field_set = std.StaticBitSet(fields.len).initEmpty();
+        const fields = meta.fields(T);
+        var field_set: std.bit_set.Static(fields.len) = .empty;
 
         var current_parent: ?[]const u8 = null;
 
@@ -70,7 +70,7 @@ pub const Deserializer = struct {
                             @field(result, f.name) = std.mem.zeroes(ChildType);
                             field_set.set(i);
                         }
-                        const child_fields = std.meta.fields(ChildType);
+                        const child_fields = meta.fields(ChildType);
                         inline for (child_fields) |cf| {
                             const c_name = meta.getFieldName(ChildType, cf);
                             if (std.mem.eql(u8, key, c_name)) {

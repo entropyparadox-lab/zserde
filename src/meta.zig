@@ -1,5 +1,3 @@
-const std = @import("std");
-
 pub const NamingConvention = enum {
     exact,
     snake_case,
@@ -13,6 +11,25 @@ pub const FieldOptions = struct {
     skip: bool = false,
     default: ?*const anyopaque = null,
 };
+
+pub const StructField = struct {
+    name: [:0]const u8,
+    type: type,
+    default_value_ptr: ?*const anyopaque,
+};
+
+pub fn fields(comptime T: type) [@typeInfo(T).@"struct".field_names.len]StructField {
+    const info = @typeInfo(T).@"struct";
+    var result: [info.field_names.len]StructField = undefined;
+    for (info.field_names, info.field_types, info.field_attrs, &result) |name, FieldType, attrs, *field| {
+        field.* = .{
+            .name = name,
+            .type = FieldType,
+            .default_value_ptr = attrs.default_value_ptr,
+        };
+    }
+    return result;
+}
 
 pub fn computeConvertedLength(comptime input: []const u8, comptime convention: NamingConvention) usize {
     if (convention == .exact or convention == .snake_case) {
@@ -110,7 +127,7 @@ pub fn getFieldOptions(comptime T: type, comptime field_name: []const u8) FieldO
     return opts;
 }
 
-pub fn getFieldName(comptime T: type, comptime field: std.builtin.Type.StructField) []const u8 {
+pub fn getFieldName(comptime T: type, comptime field: StructField) []const u8 {
     const opts = getFieldOptions(T, field.name);
     if (opts.rename) |custom| {
         return custom;

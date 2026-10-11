@@ -45,7 +45,7 @@ fn writeIndent(writer: anytype, depth: usize) !void {
 
 fn serializeStruct(s: anytype, writer: anytype, depth: usize) !void {
     const T = @TypeOf(s);
-    const fields = std.meta.fields(T);
+    const fields = meta.fields(T);
 
     inline for (fields) |f| {
         const opts = meta.getFieldOptions(T, f.name);

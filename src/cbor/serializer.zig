@@ -141,7 +141,7 @@ fn serializeValue(value: anytype, writer: anytype) !void {
 
 fn serializeStruct(s: anytype, writer: anytype) !void {
     const T = @TypeOf(s);
-    const fields = std.meta.fields(T);
+    const fields = meta.fields(T);
 
     var count: usize = 0;
     inline for (fields) |f| {

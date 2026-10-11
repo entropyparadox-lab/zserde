@@ -1,4 +1,5 @@
 const std = @import("std");
+const meta = @import("../meta.zig");
 
 pub const ValidationError = error{
     ValueTooSmall,
@@ -38,7 +39,7 @@ pub fn validate(value: anytype) ValidationError!void {
                 const rules = @field(T, "zvalidate");
                 const rules_type = @TypeOf(rules);
 
-                inline for (std.meta.fields(T)) |f| {
+                inline for (meta.fields(T)) |f| {
                     if (@hasField(rules_type, f.name)) {
                         const rule = @field(rules, f.name);
                         const field_val = @field(value, f.name);
@@ -48,7 +49,7 @@ pub fn validate(value: anytype) ValidationError!void {
             }
 
             // Recursively validate nested structs (direct, optional, or slice)
-            inline for (std.meta.fields(T)) |f| {
+            inline for (meta.fields(T)) |f| {
                 const field_info = @typeInfo(f.type);
                 if (field_info == .@"struct") {
                     try validate(@field(value, f.name));
@@ -76,7 +77,7 @@ pub fn validateWithReport(value: anytype, allocator: std.mem.Allocator) !Validat
         const rules = @field(T, "zvalidate");
         const rules_type = @TypeOf(rules);
 
-        inline for (std.meta.fields(T)) |f| {
+        inline for (meta.fields(T)) |f| {
             if (@hasField(rules_type, f.name)) {
                 const rule = @field(rules, f.name);
                 const field_val = @field(value, f.name);

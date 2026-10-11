@@ -6,13 +6,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug! Please ensure you have tested against the latest release of `zserde` and a supported version of Zig (0.16.0+).
+        Thanks for reporting a bug! Please ensure you have tested against the latest development version of `zserde` and Zig 0.17.0-dev.
   - type: input
     id: version
     attributes:
       label: "Zig & zserde Version"
       description: "Run `zig version` and provide your zserde version"
-      placeholder: "Zig: 0.16.0, zserde: v1.0.1"
+      placeholder: "Zig: 0.17.0-dev.2085+5e36170b5, zserde: main"
     validations:
       required: true
   - type: textarea

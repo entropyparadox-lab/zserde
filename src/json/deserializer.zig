@@ -240,9 +240,9 @@ pub const Deserializer = struct {
     fn parseStruct(self: *Deserializer, comptime T: type, allocator: ?std.mem.Allocator) !T {
         try self.expectChar('{');
         var result: T = undefined;
-        var field_set = std.StaticBitSet(std.meta.fields(T).len).initEmpty();
+        var field_set: std.bit_set.Static(meta.fields(T).len) = .empty;
 
-        const fields = std.meta.fields(T);
+        const fields = meta.fields(T);
 
         self.skipWhitespace();
         if (self.peek() == '}') {

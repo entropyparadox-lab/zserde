@@ -1,11 +1,11 @@
 # zserde ⚡
 
-[![Zig Version](https://img.shields.io/badge/Zig-0.16.0%2B-orange.svg)](https://ziglang.org)
+[![Zig Version](https://img.shields.io/badge/Zig-0.17.0%2B-orange.svg)](https://ziglang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Zero Allocations](https://img.shields.io/badge/Zero--Copy-Borrowed%20Slices-brightgreen.svg)]()
 [![Codecs](https://img.shields.io/badge/5--in--1-JSON%20|%20MsgPack%20|%20CBOR%20|%20TOML%20|%20YAML-purple.svg)]()
 
-**Zero-Allocation Multi-Format Serialization & Comptime Validation for Zig (v0.16.0+)**
+**Zero-Allocation Multi-Format Serialization & Comptime Validation for Zig (v0.17.0+)**
 
 `zserde` gives Zig developers the ergonomic power of Rust's `serde` and Python's `pydantic`. It provides **zero-copy deserialization**, **comptime struct reflection**, and **zero-cost schema validation** across **JSON, MessagePack, CBOR, TOML, and YAML** with 100% pure Zig and zero C dependencies.
 
@@ -30,7 +30,7 @@
 ### 1. Fetch package into `build.zig.zon`
 
 ```bash
-zig fetch --save https://github.com/entropyparadox-lab/zserde/archive/refs/tags/v1.0.1.tar.gz
+zig fetch --save https://github.com/entropyparadox-lab/zserde/archive/refs/heads/main.tar.gz
 ```
 
 ### 2. Add module in your `build.zig`

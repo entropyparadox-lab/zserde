@@ -38,7 +38,7 @@ pub fn serialize(allocator: std.mem.Allocator, value: anytype) ![]u8 {
 
 fn serializeStruct(s: anytype, writer: anytype) !void {
     const T = @TypeOf(s);
-    const fields = std.meta.fields(T);
+    const fields = meta.fields(T);
 
     // 1. First pass: write simple scalar fields
     inline for (fields) |f| {
@@ -83,7 +83,7 @@ fn writeSection(comptime StructType: type, section_name: []const u8, val: anytyp
     try writer.writeAll(section_name);
     try writer.writeAll("]\n");
 
-    const child_fields = std.meta.fields(StructType);
+    const child_fields = meta.fields(StructType);
     inline for (child_fields) |cf| {
         const copts = meta.getFieldOptions(StructType, cf.name);
         if (!copts.skip) {

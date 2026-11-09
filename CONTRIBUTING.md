@@ -8,7 +8,7 @@ Thank you for contributing to `zserde`! To maintain the highest reliability, per
 
 Zig standard library evolves rapidly. We maintain a strict **Dual-Branch Strategy**:
 
-* **`main` (Protected)**: Targets **Official Stable Zig (`0.16.x`)**. All production releases (`vX.Y.Z`) are cut exclusively from `main`.
+* **`main` (Protected)**: Targets **Official Stable Zig (`0.17.1`; minimum supported `0.17.0`)**. All production releases (`vX.Y.Z`) are cut exclusively from `main`.
 * **`zig-master`**: Tracks upstream `ziglang/zig` nightly builds to prepare for upcoming breaking changes in advance.
 * **`feat/<name>` / `fix/<name>`**: Branch off `main` for stable changes, or off `zig-master` for nightly-only fixes.
 

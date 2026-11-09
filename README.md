@@ -27,6 +27,12 @@
 
 ## Installation (30 Seconds)
 
+Tested with Zig **0.17.1**; minimum supported Zig **0.17.0**.
+
+Development install from `main` (moving branch, not a published 1.1.1 tag).
+`zig fetch --save` records the content hash; commit `build.zig.zon` to pin it.
+The 1.1.1 package changes are available after this branch is merged.
+
 ### 1. Fetch package into `build.zig.zon`
 
 ```bash

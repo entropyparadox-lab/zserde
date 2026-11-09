@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   lint-and-format:
-    name: Code Style & Lint
+    name: lint-and-format
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -21,7 +21,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0
+          version: 0.17.1
 
       - name: Check Formatting
         run: zig fmt --check src/ examples/ tests/ build.zig
@@ -50,7 +50,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0
+          version: 0.17.1
 
       - name: Run Unit & Integration Tests
         run: zig build test

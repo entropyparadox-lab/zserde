@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Pin CI to stable Zig 0.17.1 while retaining the tested Zig 0.17.0 minimum.
+- Match the lint check name to the existing required branch-protection context without changing its checks.
 - Include examples, tests, and this changelog in package archives so declared build steps can run.
 
 ### Documentation

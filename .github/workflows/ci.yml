@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   lint-and-format:
-    name: Code Style & Lint
+    name: lint-and-format
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code

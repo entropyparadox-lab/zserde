@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2026-11-09
+
+### Fixed
+- Pin CI to stable Zig 0.17.1 while retaining the tested Zig 0.17.0 minimum.
+- Include examples, tests, and this changelog in package archives so declared build steps can run.
+
+### Documentation
+- Clarify development installation from main, content-hash pinning, and compiler support.
+- No library API or algorithm changes.
+
 ## [1.0.1] - 2026-09-01
 
 ### Fixed
